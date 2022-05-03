@@ -27,6 +27,8 @@
 
 class BinPacking {
 public:
+    std::atomic<bool> working;
+
     BinPacking(int _c, std::vector<int> &_weight, int _numThreads) : c(_c), weightOfItems(std::move(_weight)),
                                                                      _UB(0), countBranches(0), numThreads(_numThreads),
                                                                      solution(std::vector<int>(_weight.size(), 0)),
@@ -87,8 +89,42 @@ public:
     void recvCommandStop() {
         printf("recvcmdstop\n");
         foundRes.store(true);
-        isClosed.store(true);
         clearQueue();
+        endThreadPool();
+    }
+
+    void initThreadPool() {
+        for (int i = 0; i < numThreads; ++i) {
+            std::thread(&BinPacking::worker, this).detach();
+        }
+    }
+
+    void append(Branch &&task) {
+        if (foundRes) return;
+        //        std::lock_guard<std::mutex> locker(mtx);
+        mtx.lock();
+        workQueue.emplace(std::forward<Branch>(task));
+        mtx.unlock();
+        cond.notify_one();
+        if (workQueue.size() > 10 && !requestList.empty()) {
+            respondRequests();
+        }
+        printf("node%d: append/workQueue.size()=%lu,UB=%d\n", id_MPI, workQueue.size(), _UB.load());
+    }
+
+
+    void waitForFinished() {
+        std::unique_lock<std::mutex> lock(mtx);
+        while (!isClosed) {
+            finished.wait(lock, [this]() {
+                printf("node%d,size=%d,busy=%d,working=%d\n",id_MPI,workQueue.size(),busy,working.load());
+                return workQueue.empty() && (busy == 0)&&working;
+            });
+            working= false;
+            lock.unlock();
+            sendRequestToMaster();
+            lock.lock();
+        }
     }
 
 private:
@@ -96,11 +132,6 @@ private:
 
     void respondRequests();
 
-    void initThreadPool() {
-        for (int i = 0; i < numThreads; ++i) {
-            std::thread(&BinPacking::worker, this).detach();
-        }
-    }
 
     void worker() {
         std::unique_lock<std::mutex> locker(mtx);
@@ -117,25 +148,12 @@ private:
             } else if (isClosed) {
                 break;
             } else {
+
                 cond.wait(locker);
             }
         }
     }
 
-
-    void append(Branch &&task) {
-        if (foundRes) return;
-//        std::lock_guard<std::mutex> locker(mtx);
-        mtx.lock();
-        workQueue.emplace(std::forward<Branch>(task));
-        mtx.unlock();
-        cond.notify_one();
-
-        if (workQueue.size() > 10 && !requestList.empty()) {
-            respondRequests();
-        }
-        printf("node%d: append/workQueue.size()=%lu,UB=%d\n", id_MPI, workQueue.size(), _UB.load());
-    }
 
     /*
     void append(Branch &&task) {
@@ -201,13 +219,7 @@ private:
 
     }
 */
-    void waitForFinished() {
-        std::unique_lock<std::mutex> lock(mtx);
-        finished.wait(lock, [this]() {
-            printf("node%d,workQueue=%d,busy=%d,closed%d\n", id_MPI, workQueue.size(), busy, isClosed.load());
-            return workQueue.empty() && (busy == 0);
-        });
-    }
+
 
     void clearQueue() {
         std::lock_guard<std::mutex> locker(mtx);
@@ -219,7 +231,6 @@ private:
         isClosed = true;
 
         cond.notify_all();
-
     }
 
 private:
@@ -239,6 +250,7 @@ private:
     int c;//capacity of bin
     std::atomic<int> _UB;
     std::atomic<int> countBranches;
+//    std::atomic<int> nonWorkingThreads;
 //    std::atomic<int> numberOfTasks;
     int LB{};
     std::atomic<bool> foundRes;

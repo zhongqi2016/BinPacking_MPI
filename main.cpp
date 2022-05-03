@@ -15,7 +15,7 @@ void otherNodes(int numThreads) {
 //        MPI_Bcast(command, 2, MPI_INT, id_root, MPI_COMM_WORLD);
 //        int *inputData = (int *) malloc(command[1] * sizeof(int));
 //        MPI_Bcast(inputData, command[1], MPI_INT, id_root, MPI_COMM_WORLD);
-    BinPacking *binPacking= nullptr;
+    BinPacking *binPacking = nullptr;
 //        BinPacking binPacking = BinPacking::dataDeserialize(inputData, numThreads);
 //        free(inputData);
     run = true;
@@ -30,31 +30,35 @@ void otherNodes(int numThreads) {
             }
             case 0: {
                 binPacking->recvCommandStop();
-//                binPacking->sendRequestToMaster();
+                binPacking->sendRequestToMaster();
                 break;
             }
             case 1: {
                 int *inputData = (int *) malloc(command[1] * sizeof(int));
                 MPI_Recv(inputData, command[1], MPI_INT, id_root, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                if (binPacking != nullptr) { delete binPacking;
-                binPacking= nullptr;}
+                if (binPacking != nullptr) {
+                    delete binPacking;
+                    binPacking = nullptr;
+                }
                 binPacking = new BinPacking(inputData, numThreads);
                 free(inputData);
+                binPacking->initThreadPool();
+                thread(&BinPacking::waitForFinished, binPacking).detach();
                 printf("node%d: got bin packing data size=%d\n", procId, command[1]);
                 break;
             }
             case 2: {
-                printf("get branch size=%d\n", command[1]);
                 int *inputData = (int *) malloc(command[1] * sizeof(int));
                 MPI_Recv(inputData, command[1], MPI_INT, MPI_ANY_SOURCE, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 printf("node%d: got branch data\n", procId);
-
                 Branch branch = binPacking->branchDeserialize(inputData);
                 free(inputData);
+                binPacking->working= true;
+                binPacking->append(move(branch));
                 command[0] = 5;
                 command[1] = procId;
                 MPI_Send(command, 2, MPI_INT, id_root, 0, MPI_COMM_WORLD);
-                thread(&BinPacking::BNB, binPacking, move(branch)).detach();
+//                thread(&BinPacking::BNB, binPacking, move(branch)).detach();
 //                binPacking->BNB(branch);
                 break;
             }
@@ -78,7 +82,7 @@ void masterNode(string &path, int num_threads) {
     readFiles.sortDirs();
     int numProcs;
     MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
-    for (int i = 13; i < readFiles.getNumOfFiles(); ++i) {
+    for (int i = 155; i < readFiles.getNumOfFiles(); ++i) {
         cout << i << ". " << readFiles.getFileName(i) << endl;
 
         BinPacking binPacking = readFiles.getData(i, num_threads);
