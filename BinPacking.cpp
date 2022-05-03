@@ -56,10 +56,20 @@ Branch BinPacking::branchDeserialize(int *inputMessage) {
 inline void BinPacking::sendRequestToMaster() {
     int command[2] = {3, id_MPI};
     MPI_Send(command, 2, MPI_INT, id_root, 0, MPI_COMM_WORLD);
+//    mtxRequestList.lock();
+    std::unique_lock<std::mutex> locker(mtx);
+    while (!requestList.empty()) {
+        command[1] = requestList.top();
+        requestList.pop();
+        locker.unlock();
+        MPI_Send(command, 2, MPI_INT, id_root, 0, MPI_COMM_WORLD);
+        locker.lock();
+    }
+//    mtxRequestList.unlock();
 }
 
 void BinPacking::sendBetterResult() {
-    printf("sendBetterResult,size=%zu\n", solution.size());
+    printf("sendBetterResult,UB=%d, size=%zu\n", _UB.load(), solution.size());
     int command[2] = {4, (int) solution.size() + 2};
     int &sizeSend = command[1];
     MPI_Send(command, 2, MPI_INT, id_root, 0, MPI_COMM_WORLD);
@@ -67,19 +77,15 @@ void BinPacking::sendBetterResult() {
     inputData[0] = sizeSend - 2;
     inputData[1] = _UB.load();
     std::copy(solution.begin(), solution.end(), &inputData[2]);
-//    for(int i=0;i<command[1];++i){
-//        printf("%d,",inputData[i]);
-//    }
-//    printf("\n");
     MPI_Send(inputData, sizeSend, MPI_INT, id_root, 1, MPI_COMM_WORLD);
 
     free(inputData);
 }
 
- void BinPacking::updateUB(int UB) {
+void BinPacking::updateUB(int UB) {
     if (_UB > 0) {
         while (UB < _UB)
-            _UB=UB;
+            _UB = UB;
     }
 }
 
@@ -90,17 +96,24 @@ int BinPacking::recvBetterResult(int size) {
     int UB_current = solutionArray[1];
     std::vector<int> newSolution(solutionArray + 2, solutionArray + size);
     free(solutionArray);
-
+    if (UB_current == LB) foundRes.store(true);
     int UB = _UB.load();
+    bool changed = false;
     while (UB > UB_current) {
+        changed = true;
         solution = std::move(newSolution);
         if (_UB.compare_exchange_weak(UB, UB_current)) {
             UB = _UB.load();
             break;
         }
     }
+
     printSolution1();
-    return UB_current;
+    if (changed) {
+        return UB_current;
+    } else {
+        return 0;
+    }
 }
 
 Branch BinPacking::init() {
@@ -132,15 +145,16 @@ Branch BinPacking::init() {
 
 void BinPacking::BNB(Branch branch) {
     initThreadPool();
+    isClosed = false;
     append(std::move(branch));
     waitForFinished();
     endThreadPool();
 
     sendRequestToMaster();
+    printf("node%d relax\n", id_MPI);
 }
 
 void BinPacking::bfs(Branch branch) {
-    printf("node%d: bfs\n", id_MPI);
 
     ++countBranches;
     //    printf("%d\n",countBranches.load());
@@ -152,10 +166,8 @@ void BinPacking::bfs(Branch branch) {
     //to all feasible initialized bins
     int j;
     z = branch.getIndexOfItem();
-    printf("z=%d,UB=%d,reduced=%d\n", z, _UB.load(), branch.getReduced());
     for (j = z - 1; j >= 0 && !foundRes; --j) {
         if (items[j].weight + items[z].weight <= c) {
-            printf("run1\n");
             Branch newBranch(branch);
             newBranch.mergeTwoItems(j, z);
             newBranch.reduction();
@@ -164,17 +176,16 @@ void BinPacking::bfs(Branch branch) {
             int UB_current = newBranch.upperBound(curSolution);
 
             if (UB_current == LB) {
-                printf("3node%d: got a better UB=%d\n", id_MPI, UB_current);
                 solution = std::move(curSolution);
                 _UB.store(UB_current);
                 foundRes.store(true);
+                isClosed.store(true);
                 clearQueue();
                 sendBetterResult();
                 return;
             }
             int UB = _UB.load();
             while (UB > UB_current) {
-                printf("4node%d: got a better UB=%d\n", id_MPI, UB_current);
                 solution = std::move(curSolution);
                 if (_UB.compare_exchange_weak(UB, UB_current)) {
                     UB = _UB.load();
@@ -195,8 +206,7 @@ void BinPacking::bfs(Branch branch) {
     }
 
     //create a new bin
-    if (z + branch.getReduced() < _UB) {
-        printf("run2\n");
+    if (z + branch.getReduced() < _UB && !foundRes) {
         Branch newBranch(branch);
         //        newBranch->addCurrentItem();
         newBranch.incrementIndex();
@@ -207,17 +217,16 @@ void BinPacking::bfs(Branch branch) {
         int UB_current = newBranch.upperBound(curSolution);
 
         if (UB_current == LB) {
-            printf("1node%d: got a better UB=%d\n", id_MPI, UB_current);
             solution = std::move(curSolution);
             _UB.store(UB_current);
             foundRes.store(true);
+            isClosed.store(true);
             clearQueue();
             sendBetterResult();
             return;
         }
         int UB = _UB.load();
         while (UB > UB_current) {
-            printf("2node%d: got a better UB=%d\n", id_MPI, UB_current);
             solution = std::move(curSolution);
             if (_UB.compare_exchange_weak(UB, UB_current)) {
                 UB = _UB.load();
@@ -276,4 +285,33 @@ void BinPacking::printSolution2() {
         printf("},");
     }
     printf("\n");
+}
+
+void BinPacking::respondRequests() {
+    int command[2];
+    std::unique_lock<std::mutex> locker1(mtx);
+    std::unique_lock<std::mutex> locker2(mtxRequestList);
+    while (workQueue.size() > 10 && !requestList.empty()) {
+        int dest = std::move(requestList.top());
+        requestList.pop();
+        locker2.unlock();
+        Branch task = std::move(workQueue.top());
+        workQueue.pop();
+        locker1.unlock();
+
+        std::vector<int> sendData = branchSerialization(task);
+        command[0] = 2;//branch data
+        command[1] = sendData.size();//size of sendData
+        MPI_Send(command, 2, MPI_INT, dest, 0, MPI_COMM_WORLD);
+        MPI_Send(sendData.data(), command[1], MPI_INT, dest, 2, MPI_COMM_WORLD);
+        printf("send bound to node%d\n", dest);
+        locker1.lock();
+        locker2.lock();
+    }
+}
+
+void BinPacking::readRequest(int command[2]) {
+    requestList.emplace(command[1]);
+    printf("read request from node%d\n", command[1]);
+    respondRequests();
 }
