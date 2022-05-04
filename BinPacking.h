@@ -117,7 +117,7 @@ public:
         std::unique_lock<std::mutex> lock(mtx);
         while (!isClosed) {
             finished.wait(lock, [this]() {
-                printf("node%d,size=%d,busy=%d,working=%d\n",id_MPI,workQueue.size(),busy,working.load());
+//                printf("node%d,size=%d,busy=%d,working=%d\n",id_MPI,workQueue.size(),busy,working.load());
                 return workQueue.empty() && (busy == 0)&&working;
             });
             working= false;

@@ -48,12 +48,12 @@ void otherNodes(int numThreads) {
                 break;
             }
             case 2: {
+                binPacking->working= true;
                 int *inputData = (int *) malloc(command[1] * sizeof(int));
                 MPI_Recv(inputData, command[1], MPI_INT, MPI_ANY_SOURCE, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 printf("node%d: got branch data\n", procId);
                 Branch branch = binPacking->branchDeserialize(inputData);
                 free(inputData);
-                binPacking->working= true;
                 binPacking->append(move(branch));
                 command[0] = 5;
                 command[1] = procId;
@@ -82,7 +82,7 @@ void masterNode(string &path, int num_threads) {
     readFiles.sortDirs();
     int numProcs;
     MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
-    for (int i = 155; i < readFiles.getNumOfFiles(); ++i) {
+    for (int i = 20; i < readFiles.getNumOfFiles(); ++i) {
         cout << i << ". " << readFiles.getFileName(i) << endl;
 
         BinPacking binPacking = readFiles.getData(i, num_threads);
@@ -197,6 +197,7 @@ void masterNode(string &path, int num_threads) {
             int countBranches = binPacking.getCountBranches();
             printf("result=%d, time=, branches=%d\n", result, countBranches);
         }
+        break;
     }
 }
 
