@@ -11,12 +11,7 @@ void otherNodes(int numThreads) {
     MPI_Comm_rank(MPI_COMM_WORLD, &procId);
     printf("node%d start\n", procId);
     int command[2];
-//        MPI_Bcast(command, 2, MPI_INT, id_root, MPI_COMM_WORLD);
-//        int *inputData = (int *) malloc(command[1] * sizeof(int));
-//        MPI_Bcast(inputData, command[1], MPI_INT, id_root, MPI_COMM_WORLD);
     BinPacking *binPacking = nullptr;
-//        BinPacking binPacking = BinPacking::dataDeserialize(inputData, numThreads);
-//        free(inputData);
     run = true;
     //0: not run, 1:inputData, 2:branch data, 3:request for data, 4:a better solution, 5:got data
     while (run) {
@@ -103,8 +98,6 @@ void masterNode(string &path, int num_threads) {
                 MPI_Send(inputData.data(), command[1], MPI_INT, idOfOtherProcs, 1, MPI_COMM_WORLD);
                 printf("send binPacking to %d,size=%d\n", idOfOtherProcs, command[1]);
             }
-//            MPI_Bcast(command, 2, MPI_INT, id_root, MPI_COMM_WORLD);
-//            MPI_Bcast(inputData.data(), command[1], MPI_INT, id_root, MPI_COMM_WORLD);
 
             //send branch to one of node
             std::vector<int> serialBranch = binPacking.branchSerialization(branch);
