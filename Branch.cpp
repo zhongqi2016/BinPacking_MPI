@@ -74,7 +74,7 @@ void setDistribution(std::vector<int> &distribution, int num, int index) {
 int Branch::upperBound(std::vector<int> &currSolution) {
     int result = 0;
     int length = items.size();
-    int ava[length];
+    int freeSpace[length];
 
     for (int i = 0; i < length; ++i) {
         if (items[i].weight == 0) continue;
@@ -83,17 +83,17 @@ int Branch::upperBound(std::vector<int> &currSolution) {
         int bin_min = 0;
         int weight_i = items[i].weight;
         for (j = 0; j < result; j++) {
-            if (ava[j] >= weight_i && ava[j] - weight_i < min) {
-                min = ava[j] - weight_i;
+            if (freeSpace[j] >= weight_i && freeSpace[j] - weight_i < min) {
+                min = freeSpace[j] - weight_i;
                 bin_min = j;
             }
         }
         if (min == c + 1) {
-            ava[result] = c - weight_i;
+            freeSpace[result] = c - weight_i;
             setDistribution(currSolution, result + 1, items[i].index);
             ++result;
         } else {
-            ava[bin_min] -= weight_i;
+            freeSpace[bin_min] -= weight_i;
             setDistribution(currSolution, bin_min + 1, items[i].index);
         }
     }

@@ -4,7 +4,6 @@
 
 using namespace std;
 
-
 void otherNodes(int numThreads) {
     bool run;
     int procId, numProcs;
@@ -48,18 +47,15 @@ void otherNodes(int numThreads) {
                 break;
             }
             case 2: {
-                binPacking->working= true;
                 int *inputData = (int *) malloc(command[1] * sizeof(int));
                 MPI_Recv(inputData, command[1], MPI_INT, MPI_ANY_SOURCE, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 printf("node%d: got branch data\n", procId);
                 Branch branch = binPacking->branchDeserialize(inputData);
                 free(inputData);
-                binPacking->append(move(branch));
+                binPacking->appendInitBranch(move(branch));
                 command[0] = 5;
                 command[1] = procId;
                 MPI_Send(command, 2, MPI_INT, id_root, 0, MPI_COMM_WORLD);
-//                thread(&BinPacking::BNB, binPacking, move(branch)).detach();
-//                binPacking->BNB(branch);
                 break;
             }
             case 3: {
@@ -75,6 +71,7 @@ void otherNodes(int numThreads) {
 
 //        binPacking.reset();
     }
+
 }
 
 void masterNode(string &path, int num_threads) {
@@ -82,12 +79,13 @@ void masterNode(string &path, int num_threads) {
     readFiles.sortDirs();
     int numProcs;
     MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
-    for (int i = 20; i < readFiles.getNumOfFiles(); ++i) {
+    for (int i = 0; i < readFiles.getNumOfFiles(); ++i) {
         cout << i << ". " << readFiles.getFileName(i) << endl;
 
         BinPacking binPacking = readFiles.getData(i, num_threads);
         std::vector<int> inputData = binPacking.getSerializeInputData();
-
+        clock_t start, end;
+        start = clock();
         Branch branch = binPacking.init();
 
         MPI_Status stats[numProcs - 1];
@@ -191,13 +189,20 @@ void masterNode(string &path, int num_threads) {
                     run = false;
                 }
             }
+            end=clock();
             binPacking.organize();
             binPacking.printSolution2();
             int result = binPacking.getUB();
-            int countBranches = binPacking.getCountBranches();
-            printf("result=%d, time=, branches=%d\n", result, countBranches);
+//            int countBranches = binPacking.getCountBranches();
+            double time = (double) (end - start) / CLOCKS_PER_SEC;
+            printf("result=%d, time=%lf\n", result,time);
         }
         break;
+    }
+    int command[2];
+    for (int j = 1; j < numProcs; ++j) {
+        command[0] = -1;
+        MPI_Send(command, 2, MPI_INT, j, 0, MPI_COMM_WORLD);
     }
 }
 

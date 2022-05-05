@@ -57,6 +57,7 @@ inline void BinPacking::sendRequestToMaster() {
     int command[2] = {3, id_MPI};
     MPI_Send(command, 2, MPI_INT, id_root, 0, MPI_COMM_WORLD);
 //    mtxRequestList.lock();
+    printf("node%d: sent request\n", id_MPI);
     std::unique_lock<std::mutex> locker(mtx);
     while (!requestList.empty()) {
         command[1] = requestList.top();
@@ -247,6 +248,7 @@ void BinPacking::bfs(Branch branch) {
     //    delete branch;
 }
 
+
 void BinPacking::organize() {
     int min = *std::min_element(solution.begin(), solution.end());
     if (min < 0) min = -min;
@@ -314,4 +316,65 @@ void BinPacking::readRequest(int command[2]) {
     requestList.emplace(command[1]);
     printf("read request from node%d\n", command[1]);
     respondRequests();
+}
+
+void BinPacking::append(Branch &&task) {
+    if (foundRes) return;
+    mtx.lock();
+    workQueue.emplace(std::forward<Branch>(task));
+    mtx.unlock();
+    cond.notify_one();
+    if (workQueue.size() > 10 && !requestList.empty()) {
+        respondRequests();
+    }
+    printf("node%d: append/workQueue.size()=%lu,UB=%d\n", id_MPI, workQueue.size(), _UB.load());
+}
+
+void BinPacking::appendInitBranch(Branch &&task) {
+    if (foundRes) return;
+    mtx.lock();
+    workQueue.emplace(std::forward<Branch>(task));
+    working = true;
+    mtx.unlock();
+    cond.notify_one();
+    if (workQueue.size() > 10 && !requestList.empty()) {
+        respondRequests();
+    }
+    printf("node%d: append/workQueue.size()=%lu,UB=%d\n", id_MPI, workQueue.size(), _UB.load());
+}
+
+void BinPacking::waitForFinished() {
+    std::unique_lock<std::mutex> lock(mtx);
+    while (!isClosed) {
+        finished.wait(lock, [this]() {
+            printf("node%d,size=%lu,busy=%d,working=%d\n", id_MPI, workQueue.size(), busy, working);
+            return workQueue.empty() && (busy == 0) && working;
+        });
+        working = false;
+        lock.unlock();
+        printf("node%d: send request\n", id_MPI);
+        sendRequestToMaster();
+        lock.lock();
+    }
+}
+
+void BinPacking::worker() {
+    std::unique_lock<std::mutex> locker(mtx);
+    while (true) {
+        if (!workQueue.empty()) {
+            ++busy;
+            Branch task = std::move(workQueue.top());
+            workQueue.pop();
+            locker.unlock();
+            bfs(std::move(task));
+            locker.lock();
+            --busy;
+            finished.notify_one();
+        } else if (isClosed) {
+            break;
+        } else {
+
+            cond.wait(locker);
+        }
+    }
 }
