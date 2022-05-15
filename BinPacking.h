@@ -96,6 +96,7 @@ public:
         for (int i = 0; i < numThreads; ++i) {
             std::thread(&BinPacking::worker, this).detach();
         }
+        working = false;
     }
 
     void append(Branch &&task);
@@ -141,8 +142,7 @@ private:
     int c;//capacity of bin
     std::atomic<int> _UB;
     std::atomic<int> countBranches;
-//    std::atomic<int> nonWorkingThreads;
-//    std::atomic<int> numberOfTasks;
+
     int LB{};
     std::atomic<bool> foundRes;
     std::vector<int> weightOfItems;

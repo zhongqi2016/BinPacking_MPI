@@ -4,19 +4,19 @@
 
 using namespace std;
 
-void otherNodes(int numThreads) {
+void worker(int numThreads) {
     bool run;
     int procId, numProcs;
     MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
     MPI_Comm_rank(MPI_COMM_WORLD, &procId);
-    printf("node%d start\n", procId);
+    printf("worker%d start\n", procId);
     int command[2];
     BinPacking *binPacking = nullptr;
     run = true;
     //0: not run, 1:inputData, 2:branch data, 3:request for data, 4:a better solution, 5:got data
     while (run) {
         MPI_Recv(command, 2, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        printf("node%d: got command %d\n", procId, command[0]);
+//        printf("worker%d: got command %d\n", procId, command[0]);
         switch (command[0]) {
             case -1: {
                 run = false;
@@ -38,13 +38,13 @@ void otherNodes(int numThreads) {
                 free(inputData);
                 binPacking->initThreadPool();
                 thread(&BinPacking::waitForFinished, binPacking).detach();
-                printf("node%d: got bin packing data size=%d\n", procId, command[1]);
+//                printf("worker%d: got bin packing data size=%d\n", procId, command[1]);
                 break;
             }
             case 2: {
                 int *inputData = (int *) malloc(command[1] * sizeof(int));
                 MPI_Recv(inputData, command[1], MPI_INT, MPI_ANY_SOURCE, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                printf("node%d: got branch data\n", procId);
+//                printf("worker%d: got branch data\n", procId);
                 Branch branch = binPacking->branchDeserialize(inputData);
                 free(inputData);
                 binPacking->appendInitBranch(move(branch));
@@ -69,12 +69,12 @@ void otherNodes(int numThreads) {
 
 }
 
-void masterNode(string &path, int num_threads) {
+void managerNode(string &path, int num_threads) {
     ReadFiles readFiles(path);
     readFiles.sortDirs();
     int numProcs;
     MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
-    for (int i = 0; i < readFiles.getNumOfFiles(); ++i) {
+    for (int i = 20; i < readFiles.getNumOfFiles(); ++i) {
         cout << i << ". " << readFiles.getFileName(i) << endl;
 
         BinPacking binPacking = readFiles.getData(i, num_threads);
@@ -96,14 +96,14 @@ void masterNode(string &path, int num_threads) {
             for (int idOfOtherProcs = 1; idOfOtherProcs < numProcs; ++idOfOtherProcs) {
                 MPI_Send(command, 2, MPI_INT, idOfOtherProcs, 0, MPI_COMM_WORLD);
                 MPI_Send(inputData.data(), command[1], MPI_INT, idOfOtherProcs, 1, MPI_COMM_WORLD);
-                printf("send binPacking to %d,size=%d\n", idOfOtherProcs, command[1]);
+//                printf("send binPacking to %d,size=%d\n", idOfOtherProcs, command[1]);
             }
 
             //send branch to one of node
             std::vector<int> serialBranch = binPacking.branchSerialization(branch);
             command[0] = 2;
             command[1] = (int) serialBranch.size();
-            printf("send branch,size=%d\n", command[1]);
+//            printf("send branch,size=%d\n", command[1]);
             MPI_Send(command, 2, MPI_INT, 1, 0, MPI_COMM_WORLD);
             MPI_Send(&serialBranch.front(), command[1], MPI_INT, 1, 2, MPI_COMM_WORLD);
             bool run = true;
@@ -114,12 +114,12 @@ void masterNode(string &path, int num_threads) {
                 command[0] = 3;
                 command[1] = j;
                 MPI_Send(command, 2, MPI_INT, 1, 0, MPI_COMM_WORLD);
-                printf("master: sent request to node1\n");
+//                printf("master: sent request to worker1\n");
             }
             while (run) {
                 //command--- 0: not run, 1:inputData, 2:branch data, 3:request for data, 4:a better solution, 5:got data
                 MPI_Recv(command, 2, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                printf("master: got command%d\n", command[0]);
+//                printf("master: got command%d\n", command[0]);
                 switch (command[0]) {
                     case 0: {
                         //have got the best solution,stop working
@@ -136,14 +136,14 @@ void masterNode(string &path, int num_threads) {
                             workingList.erase(notWorkingNode);
                         }
                         if (!binPacking.resFound()) {
-                            printf("master: got request from %d\n", command[1]);
+//                            printf("master: got request from %d\n", command[1]);
                             auto workingNode = workingList.begin();
                             if (workingNode == workingList.end()) {
                                 run = false;
                                 break;
                             } else {
                                 MPI_Send(command, 2, MPI_INT, *workingNode, 0, MPI_COMM_WORLD);
-                                printf("master: sent request to %d,[%d,%d]\n", *workingNode, command[0], command[1]);
+//                                printf("master: sent request to %d,[%d,%d]\n", *workingNode, command[0], command[1]);
                             }
                         }
                         break;
@@ -153,17 +153,17 @@ void masterNode(string &path, int num_threads) {
                         if (betterUB != 0) {
                             if (!binPacking.resFound()) {
                                 command[1] = betterUB;
-                                printf("master: got a better upper bound:%d\n", betterUB);
+//                                printf("master: got a better upper bound:%d\n", betterUB);
                                 for (int j = 1; j < numProcs; ++j) {
                                     MPI_Isend(command, 2, MPI_INT, j, 0, MPI_COMM_WORLD, &reqs[j - 1]);
-                                    printf("send better UB to node%d\n", j);
+//                                    printf("send better UB to worker%d\n", j);
                                 }
                                 MPI_Waitall(numProcs - 1, reqs, stats);
                             } else {
                                 command[0] = 0;
                                 for (int j = 1; j < numProcs; ++j) {
                                     MPI_Isend(command, 2, MPI_INT, j, 0, MPI_COMM_WORLD, &reqs[j - 1]);
-                                    printf("send stop UB to node%d\n", j);
+//                                    printf("send stop UB to worker%d\n", j);
                                 }
                                 MPI_Waitall(numProcs - 1, reqs, stats);
                             }
@@ -177,7 +177,7 @@ void masterNode(string &path, int num_threads) {
                     }
 
                 }
-                printf("master: size of workinglist %d\n", workingList.size());
+//                printf("master: size of workinglist %d\n", workingList.size());
                 if (workingList.empty()) {
                     run = false;
                 }
@@ -214,9 +214,9 @@ int main(int argc, char *argv[]) {
     MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
     MPI_Comm_rank(MPI_COMM_WORLD, &procId);
     if (procId == 0) {
-        masterNode(path, num_threads);
+        managerNode(path, num_threads);
     } else {
-        otherNodes(num_threads);
+        worker(num_threads);
     }
 
     MPI_Finalize();

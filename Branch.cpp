@@ -25,11 +25,8 @@ std::vector<int> Branch::serialization() {
 }
 
 inline int Branch::L2withA(int alpha) const {
-    int J1 = 0;
-    int J2 = 0;
-    int J3 = 0;
-    int sumJ3 = 0;
-    int sumJ2 = 0;
+    int J1 = 0,J2 = 0,J3 = 0;
+    int sumJ3 = 0,sumJ2 = 0;
     int length = int(items.size());
     for (int i = 0; i < length; i++) {
         int weight_i = items[i].weight;
@@ -52,7 +49,6 @@ inline int Branch::L2withA(int alpha) const {
 int Branch::lowerBound2() const {
     int max = 0;
     int L;
-
     for (int a = 0; a <= c / 2; a++) {
         L = L2withA(a);
         if (L > max) {
